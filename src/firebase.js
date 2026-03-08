@@ -12,3 +12,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 export const db = getFirestore(app)
+
+// Wraps any promise with a timeout - prevents infinite hangs
+export function withTimeout(promise, ms = 10000) {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Request timed out. Check your internet connection.')), ms)
+  )
+  return Promise.race([promise, timeout])
+}

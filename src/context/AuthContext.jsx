@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react'
-import { db } from '../firebase'
+import { db, withTimeout } from '../firebase'
 import {
   collection, query, where, getDocs,
   addDoc, setDoc, deleteDoc, doc,
@@ -24,17 +24,17 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const seedAdmin = async () => {
       try {
-        const snap = await getDocs(
+        const snap = await withTimeout(getDocs(
           query(collection(db, 'users'), where('username', '==', 'admin'))
-        )
+        ))
         if (snap.empty) {
-          await setDoc(doc(db, 'users', 'admin'), {
+          await withTimeout(setDoc(doc(db, 'users', 'admin'), {
             username: 'admin',
             password: 'admin123',
             name: 'Administrator',
             role: 'admin',
             createdAt: new Date().toISOString(),
-          })
+          }))
         }
       } catch {
         // seed failed silently - login will handle it
@@ -47,21 +47,21 @@ export function AuthProvider({ children }) {
     try {
       // If logging in as admin and not found, seed first
       if (username === 'admin') {
-        const adminSnap = await getDocs(
+        const adminSnap = await withTimeout(getDocs(
           query(collection(db, 'users'), where('username', '==', 'admin'))
-        )
+        ))
         if (adminSnap.empty) {
-          await setDoc(doc(db, 'users', 'admin'), {
+          await withTimeout(setDoc(doc(db, 'users', 'admin'), {
             username: 'admin',
             password: 'admin123',
             name: 'Administrator',
             role: 'admin',
             createdAt: new Date().toISOString(),
-          })
+          }))
         }
       }
       const q = query(collection(db, 'users'), where('username', '==', username))
-      const snap = await getDocs(q)
+      const snap = await withTimeout(getDocs(q))
       if (snap.empty) return { success: false, error: 'Invalid username or password' }
       const userDoc = snap.docs[0]
       const userData = userDoc.data()
@@ -70,8 +70,8 @@ export function AuthProvider({ children }) {
       localStorage.setItem(SESSION_KEY, JSON.stringify(session))
       setCurrentUser(session)
       return { success: true }
-    } catch {
-      return { success: false, error: 'Connection error. Please try again.' }
+    } catch (err) {
+      return { success: false, error: err.message || 'Connection error. Please try again.' }
     }
   }
 
@@ -82,14 +82,14 @@ export function AuthProvider({ children }) {
 
   const getAllUsers = async () => {
     const q = query(collection(db, 'users'), where('role', '==', 'user'))
-    const snap = await getDocs(q)
+    const snap = await withTimeout(getDocs(q))
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
   }
 
   const createUser = async ({ username, password, name }) => {
     try {
       const q = query(collection(db, 'users'), where('username', '==', username))
-      const snap = await getDocs(q)
+      const snap = await withTimeout(getDocs(q))
       if (!snap.empty) return { success: false, error: 'Username already exists' }
       const newUser = {
         username,
@@ -98,7 +98,7 @@ export function AuthProvider({ children }) {
         role: 'user',
         createdAt: new Date().toISOString(),
       }
-      const docRef = await addDoc(collection(db, 'users'), newUser)
+      const docRef = await withTimeout(addDoc(collection(db, 'users'), newUser))
       return { success: true, user: { id: docRef.id, ...newUser } }
     } catch {
       return { success: false, error: 'Failed to create user. Please try again.' }
@@ -106,16 +106,16 @@ export function AuthProvider({ children }) {
   }
 
   const deleteUser = async (userId) => {
-    await deleteDoc(doc(db, 'users', userId))
+    await withTimeout(deleteDoc(doc(db, 'users', userId)))
     const q = query(collection(db, 'expenses'), where('userId', '==', userId))
-    const snap = await getDocs(q)
+    const snap = await withTimeout(getDocs(q))
     await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, 'expenses', d.id))))
   }
 
   const getUserExpenseCount = async (userId) => {
     try {
       const q = query(collection(db, 'expenses'), where('userId', '==', userId))
-      const snap = await getDocs(q)
+      const snap = await withTimeout(getDocs(q))
       return snap.size
     } catch {
       return 0
