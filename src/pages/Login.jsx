@@ -8,15 +8,13 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
-    setTimeout(() => {
-      const result = login(form.username.trim(), form.password)
-      if (!result.success) setError(result.error)
-      setLoading(false)
-    }, 400)
+    const result = await login(form.username.trim(), form.password)
+    if (!result.success) setError(result.error)
+    setLoading(false)
   }
 
   return (

@@ -6,7 +6,7 @@ const emptyForm = { name: '', username: '', password: '' }
 
 export default function AdminDashboard({ onViewUser }) {
   const { currentUser, logout, getAllUsers, createUser, deleteUser, getUserExpenseCount } = useAuth()
-  const [users, setUsers] = useState(() => getAllUsers())
+  const [users, setUsers] = useState([])
   const [expenseCounts, setExpenseCounts] = useState({})
   const [form, setForm] = useState(emptyForm)
   const [showForm, setShowForm] = useState(false)
@@ -14,7 +14,15 @@ export default function AdminDashboard({ onViewUser }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [successMsg, setSuccessMsg] = useState('')
 
-  const refreshUsers = () => setUsers(getAllUsers())
+  const refreshUsers = async () => {
+    const data = await getAllUsers()
+    setUsers(data)
+  }
+
+  // Load users from Firestore on mount
+  useEffect(() => {
+    refreshUsers()
+  }, [])
 
   // Load expense counts from Firestore for all users
   useEffect(() => {
@@ -30,14 +38,14 @@ export default function AdminDashboard({ onViewUser }) {
     loadCounts()
   }, [users])
 
-  const handleCreate = (e) => {
+  const handleCreate = async (e) => {
     e.preventDefault()
     setFormError('')
     if (form.password.length < 4) {
       setFormError('Password must be at least 4 characters')
       return
     }
-    const result = createUser(form)
+    const result = await createUser(form)
     if (!result.success) {
       setFormError(result.error)
       return
@@ -45,14 +53,14 @@ export default function AdminDashboard({ onViewUser }) {
     setForm(emptyForm)
     setShowForm(false)
     setSuccessMsg(`User "${result.user.name}" created successfully!`)
-    refreshUsers()
+    await refreshUsers()
     setTimeout(() => setSuccessMsg(''), 3000)
   }
 
   const handleDelete = async () => {
     await deleteUser(confirmDeleteId)
     setConfirmDeleteId(null)
-    refreshUsers()
+    await refreshUsers()
   }
 
   return (
