@@ -18,9 +18,9 @@ export function AuthProvider({ children }) {
       return null
     }
   })
-  const [appReady, setAppReady] = useState(false)
+  const [appReady, setAppReady] = useState(true)
 
-  // Seed default admin to Firestore on first run, then mark app as ready
+  // Seed default admin to Firestore in the background (non-blocking)
   useEffect(() => {
     const seedAdmin = async () => {
       try {
@@ -36,8 +36,8 @@ export function AuthProvider({ children }) {
             createdAt: new Date().toISOString(),
           })
         }
-      } finally {
-        setAppReady(true)
+      } catch {
+        // seed failed silently - login will handle it
       }
     }
     seedAdmin()
@@ -45,6 +45,21 @@ export function AuthProvider({ children }) {
 
   const login = async (username, password) => {
     try {
+      // If logging in as admin and not found, seed first
+      if (username === 'admin') {
+        const adminSnap = await getDocs(
+          query(collection(db, 'users'), where('username', '==', 'admin'))
+        )
+        if (adminSnap.empty) {
+          await setDoc(doc(db, 'users', 'admin'), {
+            username: 'admin',
+            password: 'admin123',
+            name: 'Administrator',
+            role: 'admin',
+            createdAt: new Date().toISOString(),
+          })
+        }
+      }
       const q = query(collection(db, 'users'), where('username', '==', username))
       const snap = await getDocs(q)
       if (snap.empty) return { success: false, error: 'Invalid username or password' }
