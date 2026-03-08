@@ -18,21 +18,26 @@ export function AuthProvider({ children }) {
       return null
     }
   })
+  const [appReady, setAppReady] = useState(false)
 
-  // Seed default admin to Firestore on first run
+  // Seed default admin to Firestore on first run, then mark app as ready
   useEffect(() => {
     const seedAdmin = async () => {
-      const snap = await getDocs(
-        query(collection(db, 'users'), where('username', '==', 'admin'))
-      )
-      if (snap.empty) {
-        await setDoc(doc(db, 'users', 'admin'), {
-          username: 'admin',
-          password: 'admin123',
-          name: 'Administrator',
-          role: 'admin',
-          createdAt: new Date().toISOString(),
-        })
+      try {
+        const snap = await getDocs(
+          query(collection(db, 'users'), where('username', '==', 'admin'))
+        )
+        if (snap.empty) {
+          await setDoc(doc(db, 'users', 'admin'), {
+            username: 'admin',
+            password: 'admin123',
+            name: 'Administrator',
+            role: 'admin',
+            createdAt: new Date().toISOString(),
+          })
+        }
+      } finally {
+        setAppReady(true)
       }
     }
     seedAdmin()
@@ -104,7 +109,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ currentUser, login, logout, getAllUsers, createUser, deleteUser, getUserExpenseCount }}
+      value={{ currentUser, appReady, login, logout, getAllUsers, createUser, deleteUser, getUserExpenseCount }}
     >
       {children}
     </AuthContext.Provider>

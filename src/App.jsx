@@ -6,8 +6,18 @@ import ExpenseTracker from './components/ExpenseTracker'
 import './App.css'
 
 function AppContent() {
-  const { currentUser } = useAuth()
+  const { currentUser, appReady } = useAuth()
   const [viewingUser, setViewingUser] = useState(null)
+
+  if (!appReady) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', gap: '16px', color: '#94a3b8' }}>
+        <div style={{ width: '44px', height: '44px', border: '4px solid rgba(245,158,11,0.2)', borderTopColor: '#f59e0b', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }}></div>
+        <p>Connecting to database...</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    )
+  }
 
   if (!currentUser) return <Login />
 
