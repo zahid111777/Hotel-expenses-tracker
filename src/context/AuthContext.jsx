@@ -1,4 +1,6 @@
 import { createContext, useContext, useState } from 'react'
+import { db } from '../firebase'
+import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore'
 
 const USERS_KEY = 'hotel_auth_users'
 const SESSION_KEY = 'hotel_auth_session'
@@ -75,16 +77,20 @@ export function AuthProvider({ children }) {
     return { success: true, user: newUser }
   }
 
-  const deleteUser = (userId) => {
+  const deleteUser = async (userId) => {
     const users = loadUsers().filter((u) => u.id !== userId)
     localStorage.setItem(USERS_KEY, JSON.stringify(users))
-    localStorage.removeItem(`hotel_expenses_${userId}`)
+    // Also delete all Firestore expenses for this user
+    const q = query(collection(db, 'expenses'), where('userId', '==', userId))
+    const snap = await getDocs(q)
+    await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, 'expenses', d.id))))
   }
 
-  const getUserExpenseCount = (userId) => {
+  const getUserExpenseCount = async (userId) => {
     try {
-      const s = localStorage.getItem(`hotel_expenses_${userId}`)
-      return s ? JSON.parse(s).length : 0
+      const q = query(collection(db, 'expenses'), where('userId', '==', userId))
+      const snap = await getDocs(q)
+      return snap.size
     } catch {
       return 0
     }

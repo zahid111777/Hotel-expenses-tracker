@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import './AdminDashboard.css'
 
@@ -7,6 +7,7 @@ const emptyForm = { name: '', username: '', password: '' }
 export default function AdminDashboard({ onViewUser }) {
   const { currentUser, logout, getAllUsers, createUser, deleteUser, getUserExpenseCount } = useAuth()
   const [users, setUsers] = useState(() => getAllUsers())
+  const [expenseCounts, setExpenseCounts] = useState({})
   const [form, setForm] = useState(emptyForm)
   const [showForm, setShowForm] = useState(false)
   const [formError, setFormError] = useState('')
@@ -14,6 +15,20 @@ export default function AdminDashboard({ onViewUser }) {
   const [successMsg, setSuccessMsg] = useState('')
 
   const refreshUsers = () => setUsers(getAllUsers())
+
+  // Load expense counts from Firestore for all users
+  useEffect(() => {
+    const loadCounts = async () => {
+      const counts = {}
+      await Promise.all(
+        users.map(async (u) => {
+          counts[u.id] = await getUserExpenseCount(u.id)
+        })
+      )
+      setExpenseCounts(counts)
+    }
+    loadCounts()
+  }, [users])
 
   const handleCreate = (e) => {
     e.preventDefault()
@@ -34,8 +49,8 @@ export default function AdminDashboard({ onViewUser }) {
     setTimeout(() => setSuccessMsg(''), 3000)
   }
 
-  const handleDelete = () => {
-    deleteUser(confirmDeleteId)
+  const handleDelete = async () => {
+    await deleteUser(confirmDeleteId)
     setConfirmDeleteId(null)
     refreshUsers()
   }
@@ -81,7 +96,7 @@ export default function AdminDashboard({ onViewUser }) {
           <div>
             <p className="stat-label">Total Records</p>
             <p className="stat-value">
-              {users.reduce((a, u) => a + getUserExpenseCount(u.id), 0)}
+              {Object.values(expenseCounts).reduce((a, b) => a + b, 0)}
             </p>
           </div>
         </div>
@@ -116,7 +131,7 @@ export default function AdminDashboard({ onViewUser }) {
                   <td className="td-username">@{user.username}</td>
                   <td className="td-count">
                     <span className="record-badge">
-                      {getUserExpenseCount(user.id)} records
+                      {expenseCounts[user.id] ?? '...'} records
                     </span>
                   </td>
                   <td className="td-date">

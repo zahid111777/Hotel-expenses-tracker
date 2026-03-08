@@ -1,5 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { db } from '../firebase'
+import {
+  collection, query, where,
+  onSnapshot, addDoc, updateDoc, deleteDoc, doc,
+} from 'firebase/firestore'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import './ExpenseTracker.css'
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -28,23 +35,19 @@ function formatDate(dateStr) {
 const emptyForm = {
   date: getTodayStr(),
   breakfast: '',
+  breakfastDesc: '',
   lunch: '',
+  lunchDesc: '',
   dinner: '',
+  dinnerDesc: '',
 }
 
 export default function ExpenseTracker({ userId, userName, onBack, isAdminView }) {
   const { logout } = useAuth()
-  const STORAGE_KEY = `hotel_expenses_${userId}`
 
-  const [expenses, setExpenses] = useState(() => {
-    try {
-      const stored = localStorage.getItem(`hotel_expenses_${userId}`)
-      return stored ? JSON.parse(stored) : []
-    } catch {
-      return []
-    }
-  })
-
+  const [expenses, setExpenses] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [firestoreError, setFirestoreError] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
   const [showForm, setShowForm] = useState(false)
@@ -53,8 +56,21 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
   const [confirmDeleteMonth, setConfirmDeleteMonth] = useState(null)
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses))
-  }, [expenses])
+    const q = query(
+      collection(db, 'expenses'),
+      where('userId', '==', userId)
+    )
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
+      data.sort((a, b) => a.date.localeCompare(b.date))
+      setExpenses(data)
+      setLoading(false)
+    }, () => {
+      setFirestoreError(true)
+      setLoading(false)
+    })
+    return () => unsubscribe()
+  }, [userId])
 
   const getTotal = (b, l, d) => {
     const bf = parseFloat(b) || 0
@@ -78,8 +94,11 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
     setForm({
       date: expense.date,
       breakfast: expense.breakfast,
+      breakfastDesc: expense.breakfastDesc || '',
       lunch: expense.lunch,
+      lunchDesc: expense.lunchDesc || '',
       dinner: expense.dinner,
+      dinnerDesc: expense.dinnerDesc || '',
     })
     setEditingId(expense.id)
     setShowForm(true)
@@ -91,37 +110,25 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
     setForm(emptyForm)
   }
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault()
     if (!form.date) return
 
+    const data = {
+      userId,
+      date: form.date,
+      breakfast: form.breakfast,
+      breakfastDesc: form.breakfastDesc,
+      lunch: form.lunch,
+      lunchDesc: form.lunchDesc,
+      dinner: form.dinner,
+      dinnerDesc: form.dinnerDesc,
+    }
+
     if (editingId !== null) {
-      setExpenses((prev) =>
-        prev.map((exp) =>
-          exp.id === editingId
-            ? {
-                ...exp,
-                date: form.date,
-                breakfast: form.breakfast,
-                lunch: form.lunch,
-                dinner: form.dinner,
-              }
-            : exp
-        )
-      )
+      await updateDoc(doc(db, 'expenses', editingId), data)
     } else {
-      const newExpense = {
-        id: Date.now(),
-        date: form.date,
-        breakfast: form.breakfast,
-        lunch: form.lunch,
-        dinner: form.dinner,
-      }
-      setExpenses((prev) => {
-        const updated = [...prev, newExpense]
-        updated.sort((a, b) => a.date.localeCompare(b.date))
-        return updated
-      })
+      await addDoc(collection(db, 'expenses'), data)
     }
 
     setShowForm(false)
@@ -137,13 +144,14 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
     setConfirmDeleteId(null)
   }
 
-  const handleDelete = () => {
-    setExpenses((prev) => prev.filter((exp) => exp.id !== confirmDeleteId))
+  const handleDelete = async () => {
+    await deleteDoc(doc(db, 'expenses', confirmDeleteId))
     setConfirmDeleteId(null)
   }
 
-  const handleDeleteMonth = () => {
-    setExpenses((prev) => prev.filter((exp) => !exp.date.startsWith(confirmDeleteMonth)))
+  const handleDeleteMonth = async () => {
+    const toDelete = expenses.filter((exp) => exp.date.startsWith(confirmDeleteMonth))
+    await Promise.all(toDelete.map((exp) => deleteDoc(doc(db, 'expenses', exp.id))))
     setConfirmDeleteMonth(null)
     setFilterMonth('')
   }
@@ -169,6 +177,84 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
   const currentMonthStr = getTodayStr().substring(0, 7)
   const isFilteredMonthPast = filterMonth && filterMonth < currentMonthStr
 
+  const handleDownloadPDF = () => {
+    const doc = new jsPDF()
+
+    // Header
+    doc.setFontSize(20)
+    doc.setTextColor(40, 40, 40)
+    doc.text('Hotel Expense Receipt', 14, 22)
+
+    doc.setFontSize(10)
+    doc.setTextColor(100, 100, 100)
+    doc.text(`Name: ${userName}`, 14, 32)
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'long', year: 'numeric' })}`, 14, 38)
+
+    if (filterMonth) {
+      const [y, mo] = filterMonth.split('-')
+      const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' })
+      doc.text(`Period: ${label}`, 14, 44)
+    } else {
+      doc.text('Period: All Records', 14, 44)
+    }
+
+    const tableRows = filteredExpenses.map((exp, i) => [
+      i + 1,
+      formatDate(exp.date),
+      getDayName(exp.date),
+      exp.breakfast
+        ? `Rs.${parseFloat(exp.breakfast).toFixed(2)}${exp.breakfastDesc ? '\n' + exp.breakfastDesc : ''}`
+        : '-',
+      exp.lunch
+        ? `Rs.${parseFloat(exp.lunch).toFixed(2)}${exp.lunchDesc ? '\n' + exp.lunchDesc : ''}`
+        : '-',
+      exp.dinner
+        ? `Rs.${parseFloat(exp.dinner).toFixed(2)}${exp.dinnerDesc ? '\n' + exp.dinnerDesc : ''}`
+        : '-',
+      `Rs.${getTotal(exp.breakfast, exp.lunch, exp.dinner).toFixed(2)}`,
+    ])
+
+    autoTable(doc, {
+      head: [['Sr.', 'Date', 'Day', 'Breakfast', 'Lunch', 'Dinner', 'Total']],
+      body: tableRows,
+      foot: [[
+        { content: `Total (${filteredExpenses.length} days)`, colSpan: 3, styles: { halign: 'right' } },
+        `Rs.${breakfastTotal.toFixed(2)}`,
+        `Rs.${lunchTotal.toFixed(2)}`,
+        `Rs.${dinnerTotal.toFixed(2)}`,
+        `Rs.${grandTotal.toFixed(2)}`,
+      ]],
+      startY: 50,
+      showFoot: 'lastPage',
+      headStyles: { fillColor: [245, 158, 11], textColor: 255, fontStyle: 'bold' },
+      footStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 9, cellPadding: 3 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+    })
+
+    const filename = `receipt-${userName.replace(/\s+/g, '-')}-${filterMonth || 'all'}.pdf`
+    doc.save(filename)
+  }
+
+  if (loading) {
+    return (
+      <div className="tracker-loading">
+        <div className="tracker-spinner"></div>
+        <p>Loading expenses...</p>
+      </div>
+    )
+  }
+
+  if (firestoreError) {
+    return (
+      <div className="tracker-loading">
+        <div style={{ fontSize: '2.5rem' }}>⚠️</div>
+        <p style={{ color: '#f87171' }}>Failed to connect to database.</p>
+        <p style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Check your internet connection and try refreshing.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="tracker-container">
       {/* Header */}
@@ -187,6 +273,11 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
           <button className="btn-add" onClick={handleAddNew}>
             + Add Today's Expense
           </button>
+          {filteredExpenses.length > 0 && (
+            <button className="btn-download-pdf" onClick={handleDownloadPDF}>
+              📄 Download PDF
+            </button>
+          )}
           {!isAdminView && (
             <button className="btn-logout-tracker" onClick={logout}>Logout</button>
           )}
@@ -199,28 +290,28 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
           <div className="card-icon">☕</div>
           <div className="card-info">
             <span className="card-label">Breakfast</span>
-            <span className="card-value">₹{breakfastTotal.toFixed(2)}</span>
+            <span className="card-value">₨{breakfastTotal.toFixed(2)}</span>
           </div>
         </div>
         <div className="summary-card lunch-card">
           <div className="card-icon">🍱</div>
           <div className="card-info">
             <span className="card-label">Lunch</span>
-            <span className="card-value">₹{lunchTotal.toFixed(2)}</span>
+            <span className="card-value">₨{lunchTotal.toFixed(2)}</span>
           </div>
         </div>
         <div className="summary-card dinner-card">
           <div className="card-icon">🍽️</div>
           <div className="card-info">
             <span className="card-label">Dinner</span>
-            <span className="card-value">₹{dinnerTotal.toFixed(2)}</span>
+            <span className="card-value">₨{dinnerTotal.toFixed(2)}</span>
           </div>
         </div>
         <div className="summary-card total-card">
           <div className="card-icon">💰</div>
           <div className="card-info">
             <span className="card-label">Grand Total</span>
-            <span className="card-value">₹{grandTotal.toFixed(2)}</span>
+            <span className="card-value">₨{grandTotal.toFixed(2)}</span>
           </div>
         </div>
       </div>
@@ -293,7 +384,7 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
 
               <div className="form-row three-col">
                 <div className="form-group">
-                  <label>☕ Breakfast (₹)</label>
+                  <label>☕ Breakfast (Rs.)</label>
                   <input
                     type="number"
                     name="breakfast"
@@ -304,9 +395,17 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
                     placeholder="0.00"
                     className="form-input"
                   />
+                  <input
+                    type="text"
+                    name="breakfastDesc"
+                    value={form.breakfastDesc}
+                    onChange={handleFormChange}
+                    placeholder="e.g. egg, tea"
+                    className="form-input form-input-desc"
+                  />
                 </div>
                 <div className="form-group">
-                  <label>🍱 Lunch (₹)</label>
+                  <label>🍱 Lunch (Rs.)</label>
                   <input
                     type="number"
                     name="lunch"
@@ -317,9 +416,17 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
                     placeholder="0.00"
                     className="form-input"
                   />
+                  <input
+                    type="text"
+                    name="lunchDesc"
+                    value={form.lunchDesc}
+                    onChange={handleFormChange}
+                    placeholder="e.g. rice, dal"
+                    className="form-input form-input-desc"
+                  />
                 </div>
                 <div className="form-group">
-                  <label>🍽️ Dinner (₹)</label>
+                  <label>🍽️ Dinner (Rs.)</label>
                   <input
                     type="number"
                     name="dinner"
@@ -330,13 +437,21 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
                     placeholder="0.00"
                     className="form-input"
                   />
+                  <input
+                    type="text"
+                    name="dinnerDesc"
+                    value={form.dinnerDesc}
+                    onChange={handleFormChange}
+                    placeholder="e.g. roti, sabzi"
+                    className="form-input form-input-desc"
+                  />
                 </div>
               </div>
 
               <div className="form-total">
                 <span>Total:</span>
                 <span className="form-total-value">
-                  ₹{getTotal(form.breakfast, form.lunch, form.dinner).toFixed(2)}
+                  ₨{getTotal(form.breakfast, form.lunch, form.dinner).toFixed(2)}
                 </span>
               </div>
 
@@ -425,16 +540,19 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
                     </span>
                   </td>
                   <td className="td-amount">
-                    {exp.breakfast ? `₹${parseFloat(exp.breakfast).toFixed(2)}` : <span className="nil">—</span>}
+                    {exp.breakfast ? `₨${parseFloat(exp.breakfast).toFixed(2)}` : <span className="nil">—</span>}
+                    {exp.breakfastDesc && <div className="meal-desc">{exp.breakfastDesc}</div>}
                   </td>
                   <td className="td-amount">
-                    {exp.lunch ? `₹${parseFloat(exp.lunch).toFixed(2)}` : <span className="nil">—</span>}
+                    {exp.lunch ? `₨${parseFloat(exp.lunch).toFixed(2)}` : <span className="nil">—</span>}
+                    {exp.lunchDesc && <div className="meal-desc">{exp.lunchDesc}</div>}
                   </td>
                   <td className="td-amount">
-                    {exp.dinner ? `₹${parseFloat(exp.dinner).toFixed(2)}` : <span className="nil">—</span>}
+                    {exp.dinner ? `₨${parseFloat(exp.dinner).toFixed(2)}` : <span className="nil">—</span>}
+                    {exp.dinnerDesc && <div className="meal-desc">{exp.dinnerDesc}</div>}
                   </td>
                   <td className="td-total">
-                    ₹{getTotal(exp.breakfast, exp.lunch, exp.dinner).toFixed(2)}
+                    ₨{getTotal(exp.breakfast, exp.lunch, exp.dinner).toFixed(2)}
                   </td>
                   <td className="td-actions">
                     <button className="btn-edit" onClick={() => handleEdit(exp)} title="Edit">
@@ -454,10 +572,10 @@ export default function ExpenseTracker({ userId, userName, onBack, isAdminView }
             <tfoot>
               <tr className="tfoot-row">
                 <td colSpan="3" className="tfoot-label">Total ({filteredExpenses.length} days)</td>
-                <td className="tfoot-amount">₹{breakfastTotal.toFixed(2)}</td>
-                <td className="tfoot-amount">₹{lunchTotal.toFixed(2)}</td>
-                <td className="tfoot-amount">₹{dinnerTotal.toFixed(2)}</td>
-                <td className="tfoot-grand">₹{grandTotal.toFixed(2)}</td>
+                <td className="tfoot-amount">₨{breakfastTotal.toFixed(2)}</td>
+                <td className="tfoot-amount">₨{lunchTotal.toFixed(2)}</td>
+                <td className="tfoot-amount">₨{dinnerTotal.toFixed(2)}</td>
+                <td className="tfoot-grand">₨{grandTotal.toFixed(2)}</td>
                 <td></td>
               </tr>
             </tfoot>
