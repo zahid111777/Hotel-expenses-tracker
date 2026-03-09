@@ -46,15 +46,6 @@ http://localhost:5173
 
 ---
 
-## 🔐 Login Credentials
-
-### Admin
-| Field    | Value      |
-|----------|------------|
-| Username | `admin`    |
-| Password | `admin123` |
-
-> ⚠️ The admin credentials are not shown on the login page. Keep them confidential.
 
 ### Users
 Users are created by the admin from the Admin Dashboard. The admin sets their username and password.
