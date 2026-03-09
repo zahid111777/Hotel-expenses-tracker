@@ -115,14 +115,4 @@ npm run preview
 
 ---
 
-## 🗄️ Data Storage
 
-All data is stored in the browser's **localStorage**:
-
-| Key | Description |
-|-----|-------------|
-| `hotel_auth_users` | List of all users |
-| `hotel_auth_session` | Currently logged-in user session |
-| `hotel_expenses_<userId>` | Expense records per user |
-
-> Data persists across page refreshes but is browser-specific. Clearing browser data will erase all records.
